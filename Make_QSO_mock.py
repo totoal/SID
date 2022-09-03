@@ -15,7 +15,7 @@ tcurves = np.load('../LAEs/npy/tcurves.npy', allow_pickle=True).item()
 def add_errors(pm_SEDs, apply_err=True, survey_name='minijpasAEGIS001'):
     if survey_name == 'jnep':
         err_fit_params_jnep = np.load('../LAEs/npy/err_fit_params_jnep.npy')
-    elif survey_name == 'minijpas':
+    elif survey_name[:8] == 'minijpas':
         err_fit_params_001 = np.load(
             '../LAEs/npy/err_fit_params_minijpas_AEGIS001.npy')
         err_fit_params_002 = np.load(
@@ -27,7 +27,7 @@ def add_errors(pm_SEDs, apply_err=True, survey_name='minijpasAEGIS001'):
     else:
         raise ValueError('Survey name not known')
 
-    if survey_name == 'minijpas':
+    if survey_name[:8] == 'minijpas':
         detec_lim_001 = pd.read_csv('../LAEs/csv/depth3arc5s_minijpas_2241.csv',
                                     sep=',', header=0, usecols=[1]).to_numpy()
         detec_lim_002 = pd.read_csv('../LAEs/csv/depth3arc5s_minijpas_2243.csv',
@@ -45,7 +45,7 @@ def add_errors(pm_SEDs, apply_err=True, survey_name='minijpasAEGIS001'):
             )
         )
         detec_lim.shape
-    if survey_name == 'jnep':
+    elif survey_name == 'jnep':
         detec_lim = pd.read_csv('../LAEs/csv/depth3arc5s_jnep_2520.csv',
                                 sep=',', header=0, usecols=[1]).to_numpy()
 
@@ -77,9 +77,9 @@ def add_errors(pm_SEDs, apply_err=True, survey_name='minijpasAEGIS001'):
 
         tile_id_Arr = [2241, 2243, 2406, 2470]
 
-        i = float(survey_name[-1])
+        i = int(survey_name[-1])
 
-        detec_lim_i = detec_lim[:, i].reshape(-1, 1)
+        detec_lim_i = detec_lim[:, i - 1].reshape(-1, 1)
 
         if i == 1:
             a = err_fit_params_001[:, 0].reshape(-1, 1)
@@ -106,7 +106,7 @@ def add_errors(pm_SEDs, apply_err=True, survey_name='minijpasAEGIS001'):
         mags[np.isnan(mags) | np.isinf(mags)] = 99.
 
         # Zero point error
-        tile_id = tile_id_Arr[i]
+        tile_id = tile_id_Arr[i - 1]
         zpt_err = Zero_point_error(
             np.ones(mags.shape[1]) * tile_id, 'minijpas')
 
@@ -128,7 +128,7 @@ def add_errors(pm_SEDs, apply_err=True, survey_name='minijpasAEGIS001'):
     if apply_err:
         pm_SEDs += np.random.normal(size=mags.shape) * pm_SEDs_err
 
-    return pm_SEDs_err
+    return pm_SEDs, pm_SEDs_err
 
 
 def SDSS_z_Arr(mjd, plate, fiber):
@@ -166,6 +166,7 @@ def SDSS_z_Arr(mjd, plate, fiber):
         else:
             z_Arr[src] = 0.
 
+    os.makedirs(correct_dir, exist_ok=True)
     np.save(f'{correct_dir}z_arr_dr16.npy', z_Arr)
 
     return z_Arr
@@ -178,8 +179,8 @@ def main(z_min, z_max, i_min, i_max):
     pm_SEDs_DR16 = pd.read_csv(
         filename_pm_DR16, usecols=np.arange(1, 64)).to_numpy()[:, :60]
 
-    format_string4 = lambda x: '{:04d}'.format(int(x))
-    format_string5 = lambda x: '{:05d}'.format(int(x))
+    def format_string4(x): return '{:04d}'.format(int(x))
+    def format_string5(x): return '{:05d}'.format(int(x))
     convert_dict = {
         122: format_string4,
         123: format_string5,
@@ -204,13 +205,16 @@ def main(z_min, z_max, i_min, i_max):
 
     # Output distribution
     # Flat z and i
-    out_z_Arr = np.uniform(z_min, z_max, N_src)
-    out_i_Arr = np.uniform(i_min, i_max, N_src)
+    out_z_Arr = np.random.uniform(z_min, z_max, N_src)
+    out_i_Arr = np.random.uniform(i_min, i_max, N_src)
     out_i_flx_Arr = mag_to_flux(out_i_Arr, w_central[-1])
 
     # Look for the closest source of SDSS in redshift
     out_sdss_idx_list = np.zeros(out_z_Arr.shape).astype(int)
+    print('Looking for the sources in SDSS catalog')
     for src in range(N_src):
+        if src % 100 == 0:
+            print(f'{src} / {N_src}', end='\r')
         # Select sources with a redshift closer than 0.02
         closest_z_Arr = np.where(np.abs(z_Arr - out_z_Arr[src]) < 0.02)[0]
         # If less than 10 objects found with that z_diff, then select the 10 closer
@@ -221,55 +225,58 @@ def main(z_min, z_max, i_min, i_max):
         out_sdss_idx_list[src] = np.random.choice(closest_z_Arr, 1)
 
     # Correction factor to match iSDSS
-    i_corr_factor = out_i_flx_Arr[out_sdss_idx_list] / \
-        i_flx_Arr[out_sdss_idx_list]
+    i_corr_factor = out_i_flx_Arr / i_flx_Arr[out_sdss_idx_list]
 
     # Output PM array
-    pm_flx = pm_SEDs_DR16[out_sdss_idx_list] * i_corr_factor
+    pm_flx = pm_SEDs_DR16[out_sdss_idx_list] * i_corr_factor.reshape(-1, 1)
 
     # Compute errors for each field
+    print('Computing errors')
     pm_flx_AEGIS001, pm_err_AEGIS001 = add_errors(
-        pm_flx, survey_name='minijpasAEGIS001')
+        pm_flx.T, survey_name='minijpasAEGIS001')
     pm_flx_AEGIS002, pm_err_AEGIS002 = add_errors(
-        pm_flx, survey_name='minijpasAEGIS002')
+        pm_flx.T, survey_name='minijpasAEGIS002')
     pm_flx_AEGIS003, pm_err_AEGIS003 = add_errors(
-        pm_flx, survey_name='minijpasAEGIS003')
+        pm_flx.T, survey_name='minijpasAEGIS003')
     pm_flx_AEGIS004, pm_err_AEGIS004 = add_errors(
-        pm_flx, survey_name='minijpasAEGIS004')
-    pm_flx_JNEP, pm_err_JNEP = add_errors(pm_flx, survey_name='jnep')
+        pm_flx.T, survey_name='minijpasAEGIS004')
+    pm_flx_JNEP, pm_err_JNEP = add_errors(pm_flx.T, survey_name='jnep')
 
     # Make the pandas df
+    print('Saving files')
     cat_name = f'QSO_flat_z{z_min}-{z_max}_i{i_min}-{i_max}'
     dirname = f'/home/alberto/almacen/Source_cats/{cat_name}'
     os.makedirs(dirname, exist_ok=True)
 
     # Withour errors
     filename = f'{dirname}/QSO_no_err.csv'
-    hdr = [tcurves['tag'] + ['z']]
-    pd.DataFrame(np.hstack([pm_flx, out_z_Arr])).to_csv(filename, header=hdr)
+    hdr = tcurves['tag'] + ['z']
+    pd.DataFrame(
+        np.hstack([pm_flx, out_z_Arr.reshape(-1, 1)])).to_csv(filename, header=hdr)
 
     # With errors
-    hdr = [tcurves['tag'] + [s + '_e' for s in tcurves['tag']] + ['z']]
+    hdr = tcurves['tag'] + [s + '_e' for s in tcurves['tag']] + ['z']
 
     filename = f'{dirname}/QSO_AEGIS001.csv'
-    pd.DataFrame(np.hstack([pm_flx_AEGIS001, pm_err_AEGIS001, out_z_Arr])).to_csv(
+    pd.DataFrame(np.hstack([pm_flx_AEGIS001.T, pm_err_AEGIS001.T, out_z_Arr.reshape(-1, 1)])).to_csv(
         filename, header=hdr)
 
     filename = f'{dirname}/QSO_AEGIS002.csv'
-    pd.DataFrame(np.hstack([pm_flx_AEGIS002, pm_err_AEGIS002, out_z_Arr])).to_csv(
+    pd.DataFrame(np.hstack([pm_flx_AEGIS002.T, pm_err_AEGIS002.T, out_z_Arr.reshape(-1, 1)])).to_csv(
         filename, header=hdr)
 
     filename = f'{dirname}/QSO_AEGIS003.csv'
-    pd.DataFrame(np.hstack([pm_flx_AEGIS003, pm_err_AEGIS003, out_z_Arr])).to_csv(
+    pd.DataFrame(np.hstack([pm_flx_AEGIS003.T, pm_err_AEGIS003.T, out_z_Arr.reshape(-1, 1)])).to_csv(
         filename, header=hdr)
 
     filename = f'{dirname}/QSO_AEGIS004.csv'
-    pd.DataFrame(np.hstack([pm_flx_AEGIS004, pm_err_AEGIS004, out_z_Arr])).to_csv(
+    pd.DataFrame(np.hstack([pm_flx_AEGIS004.T, pm_err_AEGIS004.T, out_z_Arr.reshape(-1, 1)])).to_csv(
         filename, header=hdr)
-        
+
     filename = f'{dirname}/QSO_JNEP.csv'
-    pd.DataFrame(np.hstack([pm_flx_JNEP, pm_err_JNEP, out_z_Arr])).to_csv(
+    pd.DataFrame(np.hstack([pm_flx_JNEP.T, pm_err_JNEP.T, out_z_Arr.reshape(-1, 1)])).to_csv(
         filename, header=hdr)
+
 
 if __name__ == '__main__':
     z_min = 0.001

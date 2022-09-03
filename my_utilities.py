@@ -475,15 +475,15 @@ def JPAS_synth_phot(SEDs, w_Arr, tcurves, which_filters=[]):
         pm[fil] = sed_int / t_int
     return pm[which_filters]
 
+c = 29979245800  # cm / s
 
 def mag_to_flux(m, w):
-    c = 29979245800
     return 10**((m + 48.60) / (-2.5)) * c/w**2 * 1e8
 
 
 def flux_to_mag(f, w):
-    c = 29979245800
-    return -2.5 * np.log10(f * w**2/c * 1e-8) - 48.60
+    log_arg = np.atleast_1d(f * w**2/c * 1e-8).astype(np.float)
+    return -2.5 * np.log10(log_arg) - 48.60
 
 
 def schechter(L, phistar, Lstar, alpha):
@@ -505,7 +505,7 @@ def Zero_point_error(tile_id_Arr, catname):
 
     # Load Zero Point magnitudes
     zpt_cat = pd.read_csv(
-        f'../csv/{catname}.CalibTileImage.csv', sep=',', header=1)
+        f'../LAEs/csv/{catname}.CalibTileImage.csv', sep=',', header=1)
 
     zpt_err = zpt_cat['ERRZPT'].to_numpy()
 
