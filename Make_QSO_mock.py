@@ -12,7 +12,9 @@ w_central = central_wavelength()
 tcurves = np.load('../LAEs/npy/tcurves.npy', allow_pickle=True).item()
 
 
-def add_errors(pm_SEDs, apply_err=True, survey_name='minijpasAEGIS001'):
+def add_errors(pm_flx, apply_err=True, survey_name='minijpasAEGIS001'):
+    pm_SEDs = np.copy(pm_flx)
+
     if survey_name == 'jnep':
         err_fit_params_jnep = np.load('../LAEs/npy/err_fit_params_jnep.npy')
     elif survey_name[:8] == 'minijpas':
@@ -228,19 +230,19 @@ def main(z_min, z_max, i_min, i_max):
     i_corr_factor = out_i_flx_Arr / i_flx_Arr[out_sdss_idx_list]
 
     # Output PM array
-    pm_flx = pm_SEDs_DR16[out_sdss_idx_list] * i_corr_factor.reshape(-1, 1)
+    pm_flx_0 = pm_SEDs_DR16[out_sdss_idx_list] * i_corr_factor.reshape(-1, 1)
 
     # Compute errors for each field
     print('Computing errors')
     pm_flx_AEGIS001, pm_err_AEGIS001 = add_errors(
-        pm_flx.T, survey_name='minijpasAEGIS001')
+        pm_flx_0.T, survey_name='minijpasAEGIS001')
     pm_flx_AEGIS002, pm_err_AEGIS002 = add_errors(
-        pm_flx.T, survey_name='minijpasAEGIS002')
+        pm_flx_0.T, survey_name='minijpasAEGIS002')
     pm_flx_AEGIS003, pm_err_AEGIS003 = add_errors(
-        pm_flx.T, survey_name='minijpasAEGIS003')
+        pm_flx_0.T, survey_name='minijpasAEGIS003')
     pm_flx_AEGIS004, pm_err_AEGIS004 = add_errors(
-        pm_flx.T, survey_name='minijpasAEGIS004')
-    pm_flx_JNEP, pm_err_JNEP = add_errors(pm_flx.T, survey_name='jnep')
+        pm_flx_0.T, survey_name='minijpasAEGIS004')
+    pm_flx_JNEP, pm_err_JNEP = add_errors(pm_flx_0.T, survey_name='jnep')
 
     # Make the pandas df
     print('Saving files')
@@ -251,31 +253,32 @@ def main(z_min, z_max, i_min, i_max):
     # Withour errors
     filename = f'{dirname}/QSO_no_err.csv'
     hdr = tcurves['tag'] + ['z']
-    pd.DataFrame(
-        np.hstack([pm_flx, out_z_Arr.reshape(-1, 1)])).to_csv(filename, header=hdr)
+    df = pd.DataFrame(
+        np.hstack([pm_flx_0, out_z_Arr.reshape(-1, 1)]))
+    df.to_csv(filename, header=hdr)
 
     # With errors
     hdr = tcurves['tag'] + [s + '_e' for s in tcurves['tag']] + ['z']
 
     filename = f'{dirname}/QSO_AEGIS001.csv'
-    pd.DataFrame(np.hstack([pm_flx_AEGIS001.T, pm_err_AEGIS001.T, out_z_Arr.reshape(-1, 1)])).to_csv(
-        filename, header=hdr)
+    df = pd.DataFrame(np.hstack([pm_flx_AEGIS001.T, pm_err_AEGIS001.T, out_z_Arr.reshape(-1, 1)]))
+    df.to_csv(filename, header=hdr)
 
     filename = f'{dirname}/QSO_AEGIS002.csv'
-    pd.DataFrame(np.hstack([pm_flx_AEGIS002.T, pm_err_AEGIS002.T, out_z_Arr.reshape(-1, 1)])).to_csv(
-        filename, header=hdr)
+    df = pd.DataFrame(np.hstack([pm_flx_AEGIS002.T, pm_err_AEGIS002.T, out_z_Arr.reshape(-1, 1)]))
+    df.to_csv(filename, header=hdr)
 
     filename = f'{dirname}/QSO_AEGIS003.csv'
-    pd.DataFrame(np.hstack([pm_flx_AEGIS003.T, pm_err_AEGIS003.T, out_z_Arr.reshape(-1, 1)])).to_csv(
-        filename, header=hdr)
+    df = pd.DataFrame(np.hstack([pm_flx_AEGIS003.T, pm_err_AEGIS003.T, out_z_Arr.reshape(-1, 1)]))
+    df.to_csv(filename, header=hdr)
 
     filename = f'{dirname}/QSO_AEGIS004.csv'
-    pd.DataFrame(np.hstack([pm_flx_AEGIS004.T, pm_err_AEGIS004.T, out_z_Arr.reshape(-1, 1)])).to_csv(
-        filename, header=hdr)
+    df = pd.DataFrame(np.hstack([pm_flx_AEGIS004.T, pm_err_AEGIS004.T, out_z_Arr.reshape(-1, 1)]))
+    df.to_csv(filename, header=hdr)
 
     filename = f'{dirname}/QSO_JNEP.csv'
-    pd.DataFrame(np.hstack([pm_flx_JNEP.T, pm_err_JNEP.T, out_z_Arr.reshape(-1, 1)])).to_csv(
-        filename, header=hdr)
+    df = pd.DataFrame(np.hstack([pm_flx_JNEP.T, pm_err_JNEP.T, out_z_Arr.reshape(-1, 1)]))
+    df.to_csv(filename, header=hdr)
 
 
 if __name__ == '__main__':
