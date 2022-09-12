@@ -63,9 +63,10 @@ def add_errors(pm_flx, apply_err=True, survey_name='minijpasAEGIS001'):
         mags[np.isnan(mags) | np.isinf(mags)] = 99.
 
         # Zero point error
-        zpt_err = Zero_point_error(np.ones(mags.shape[1]) * 2520, 'jnep')
+        # zpt_err = Zero_point_error(np.ones(mags.shape[1]) * 2520, 'jnep')
 
-        mag_err = (expfit(mags) ** 2 + zpt_err ** 2) ** 0.5
+        # mag_err = (expfit(mags) ** 2 + zpt_err ** 2) ** 0.5
+        mag_err = expfit(mags)
         where_himag = np.where(mags > detec_lim)
 
         mag_err[where_himag] = expfit(detec_lim)[where_himag[0]].reshape(-1,)
@@ -109,10 +110,11 @@ def add_errors(pm_flx, apply_err=True, survey_name='minijpasAEGIS001'):
 
         # Zero point error
         tile_id = tile_id_Arr[i - 1]
-        zpt_err = Zero_point_error(
-            np.ones(mags.shape[1]) * tile_id, 'minijpas')
+        # zpt_err = Zero_point_error(
+        #     np.ones(mags.shape[1]) * tile_id, 'minijpas')
 
-        mag_err = (expfit(mags) ** 2 + zpt_err ** 2) ** 0.5
+        # mag_err = (expfit(mags) ** 2 + zpt_err ** 2) ** 0.5
+        mag_err = expfit(mags)
         where_himag = np.where(mags > detec_lim_i)
 
         mag_err[where_himag] = expfit(detec_lim_i)[where_himag[0]].reshape(-1,)
