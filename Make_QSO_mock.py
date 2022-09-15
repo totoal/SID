@@ -12,7 +12,7 @@ w_central = central_wavelength()
 tcurves = np.load('../LAEs/npy/tcurves.npy', allow_pickle=True).item()
 
 
-def add_errors(pm_flx, apply_err=True, survey_name='minijpasAEGIS001'):
+def add_errors(pm_flx, apply_err=True, survey_name='minijpasAEGIS001', use_5s_lims=True):
     pm_SEDs = np.copy(pm_flx)
 
     if survey_name == 'jnep':
@@ -48,8 +48,8 @@ def add_errors(pm_flx, apply_err=True, survey_name='minijpasAEGIS001'):
         )
         detec_lim.shape
     elif survey_name == 'jnep':
-        detec_lim = pd.read_csv('../LAEs/csv/depth3arc5s_jnep_2520.csv',
-                                sep=',', header=0, usecols=[1]).to_numpy()
+        detec_lim_i = pd.read_csv('../LAEs/csv/depth3arc5s_jnep_2520.csv',
+                                  sep=',', header=0, usecols=[1]).to_numpy()
 
     if survey_name == 'jnep':
         a = err_fit_params_jnep[:, 0].reshape(-1, 1)
@@ -60,26 +60,28 @@ def add_errors(pm_flx, apply_err=True, survey_name='minijpasAEGIS001'):
         w_central = central_wavelength().reshape(-1, 1)
 
         mags = flux_to_mag(pm_SEDs, w_central)
-        mags[np.isnan(mags) | np.isinf(mags)] = 99.
+        mags[~np.isfinite(mags)] = 99.
 
         # Zero point error
         # zpt_err = Zero_point_error(np.ones(mags.shape[1]) * 2520, 'jnep')
 
         # mag_err = (expfit(mags) ** 2 + zpt_err ** 2) ** 0.5
         mag_err = expfit(mags)
-        where_himag = np.where(mags > detec_lim)
 
-        mag_err[where_himag] = expfit(detec_lim)[where_himag[0]].reshape(-1,)
+        if use_5s_lims:
+            where_himag = np.where(mags > detec_lim_i)
+            mag_err[where_himag] = expfit(
+                detec_lim_i)[where_himag[0]].reshape(-1,)
+        else:
+            where_himag = np.where(mags > 30)
+            mag_err[where_himag] = expfit(
+                detec_lim_i)[where_himag[0]].reshape(-1,)
 
-        mags[where_himag] = detec_lim[where_himag[0]].reshape(-1,)
+        mags[where_himag] = detec_lim_i[where_himag[0]].reshape(-1,)
 
         pm_SEDs_err = mag_to_flux(
             mags - mag_err, w_central) - mag_to_flux(mags, w_central)
     elif survey_name[:8] == 'minijpas':
-        pm_SEDs_err = np.array([]).reshape(60, 0)
-
-        tile_id_Arr = [2241, 2243, 2406, 2470]
-
         i = int(survey_name[-1])
 
         detec_lim_i = detec_lim[:, i - 1].reshape(-1, 1)
@@ -106,31 +108,49 @@ def add_errors(pm_flx, apply_err=True, survey_name='minijpasAEGIS001'):
         w_central = central_wavelength().reshape(-1, 1)
 
         mags = flux_to_mag(pm_SEDs, w_central)
-        mags[np.isnan(mags) | np.isinf(mags)] = 99.
+        mags[~np.isfinite(mags)] = 99.
 
         # Zero point error
-        tile_id = tile_id_Arr[i - 1]
+        # tile_id = tile_id_Arr[i - 1]
         # zpt_err = Zero_point_error(
         #     np.ones(mags.shape[1]) * tile_id, 'minijpas')
 
         # mag_err = (expfit(mags) ** 2 + zpt_err ** 2) ** 0.5
         mag_err = expfit(mags)
-        where_himag = np.where(mags > detec_lim_i)
-
-        mag_err[where_himag] = expfit(detec_lim_i)[where_himag[0]].reshape(-1,)
+        if use_5s_lims:
+            where_himag = np.where(mags > detec_lim_i)
+            mag_err[where_himag] = expfit(
+                detec_lim_i)[where_himag[0]].reshape(-1,)
+        else:
+            where_himag = np.where(mags > 30)
+            mag_err[where_himag] = expfit(
+                detec_lim_i)[where_himag[0]].reshape(-1,)
 
         mags[where_himag] = detec_lim_i[where_himag[0]].reshape(-1,)
 
-        pm_SEDs_err_i = mag_to_flux(
+        pm_SEDs_err = mag_to_flux(
             mags - mag_err, w_central) - mag_to_flux(mags, w_central)
 
-        pm_SEDs_err = np.hstack((pm_SEDs_err, pm_SEDs_err_i))
     else:
         raise ValueError('Survey name not known')
 
     # Perturb according to the error
     if apply_err:
         pm_SEDs += np.random.normal(size=mags.shape) * pm_SEDs_err
+
+    # Re-compute the error
+    mags = flux_to_mag(pm_SEDs, w_central)
+    mags[~np.isfinite(mags)] = 99.
+
+    mag_err = expfit(mags)
+    where_himag = np.where(mags > detec_lim_i)
+
+    mag_err[where_himag] = expfit(detec_lim_i)[where_himag[0]].reshape(-1,)
+
+    mags[where_himag] = detec_lim_i[where_himag[0]].reshape(-1,)
+
+    pm_SEDs_err = mag_to_flux(
+        mags - mag_err, w_central) - mag_to_flux(mags, w_central)
 
     return pm_SEDs, pm_SEDs_err
 
@@ -176,7 +196,7 @@ def SDSS_z_Arr(mjd, plate, fiber):
     return z_Arr
 
 
-def main(z_min, z_max, i_min, i_max):
+def main(z_min, z_max, i_min, i_max, use_5s_lims=True, surname=''):
     # Load the SDSS catalog
     filename_pm_DR16 = ('../LAEs/csv/J-SPECTRA_QSO_Superset_DR16.csv')
 
@@ -205,7 +225,7 @@ def main(z_min, z_max, i_min, i_max):
     i_flx_Arr = pm_SEDs_DR16[:, -1]
 
     # Number of sources is 1e4 per \Delta i = 1
-    N_src = int((i_max - i_min) * 1e4)
+    N_src = int((i_max - i_min) * 1e1)
 
     # Output distribution
     # Flat z and i
@@ -237,18 +257,19 @@ def main(z_min, z_max, i_min, i_max):
     # Compute errors for each field
     print('Computing errors')
     pm_flx_AEGIS001, pm_err_AEGIS001 = add_errors(
-        pm_flx_0.T, survey_name='minijpasAEGIS001')
+        pm_flx_0.T, survey_name='minijpasAEGIS001', use_5s_lims=use_5s_lims)
     pm_flx_AEGIS002, pm_err_AEGIS002 = add_errors(
-        pm_flx_0.T, survey_name='minijpasAEGIS002')
+        pm_flx_0.T, survey_name='minijpasAEGIS002', use_5s_lims=use_5s_lims)
     pm_flx_AEGIS003, pm_err_AEGIS003 = add_errors(
-        pm_flx_0.T, survey_name='minijpasAEGIS003')
+        pm_flx_0.T, survey_name='minijpasAEGIS003', use_5s_lims=use_5s_lims)
     pm_flx_AEGIS004, pm_err_AEGIS004 = add_errors(
-        pm_flx_0.T, survey_name='minijpasAEGIS004')
-    pm_flx_JNEP, pm_err_JNEP = add_errors(pm_flx_0.T, survey_name='jnep')
+        pm_flx_0.T, survey_name='minijpasAEGIS004', use_5s_lims=use_5s_lims)
+    pm_flx_JNEP, pm_err_JNEP = add_errors(
+        pm_flx_0.T, survey_name='jnep', use_5s_lims=use_5s_lims)
 
     # Make the pandas df
     print('Saving files')
-    cat_name = f'QSO_flat_z{z_min}-{z_max}_i{i_min}-{i_max}'
+    cat_name = f'QSO_flat_z{z_min}-{z_max}_i{i_min}-{i_max}_{surname}'
     dirname = f'/home/alberto/almacen/Source_cats/{cat_name}'
     os.makedirs(dirname, exist_ok=True)
 
@@ -263,23 +284,28 @@ def main(z_min, z_max, i_min, i_max):
     hdr = tcurves['tag'] + [s + '_e' for s in tcurves['tag']] + ['z']
 
     filename = f'{dirname}/QSO_AEGIS001.csv'
-    df = pd.DataFrame(np.hstack([pm_flx_AEGIS001.T, pm_err_AEGIS001.T, out_z_Arr.reshape(-1, 1)]))
+    df = pd.DataFrame(
+        np.hstack([pm_flx_AEGIS001.T, pm_err_AEGIS001.T, out_z_Arr.reshape(-1, 1)]))
     df.to_csv(filename, header=hdr)
 
     filename = f'{dirname}/QSO_AEGIS002.csv'
-    df = pd.DataFrame(np.hstack([pm_flx_AEGIS002.T, pm_err_AEGIS002.T, out_z_Arr.reshape(-1, 1)]))
+    df = pd.DataFrame(
+        np.hstack([pm_flx_AEGIS002.T, pm_err_AEGIS002.T, out_z_Arr.reshape(-1, 1)]))
     df.to_csv(filename, header=hdr)
 
     filename = f'{dirname}/QSO_AEGIS003.csv'
-    df = pd.DataFrame(np.hstack([pm_flx_AEGIS003.T, pm_err_AEGIS003.T, out_z_Arr.reshape(-1, 1)]))
+    df = pd.DataFrame(
+        np.hstack([pm_flx_AEGIS003.T, pm_err_AEGIS003.T, out_z_Arr.reshape(-1, 1)]))
     df.to_csv(filename, header=hdr)
 
     filename = f'{dirname}/QSO_AEGIS004.csv'
-    df = pd.DataFrame(np.hstack([pm_flx_AEGIS004.T, pm_err_AEGIS004.T, out_z_Arr.reshape(-1, 1)]))
+    df = pd.DataFrame(
+        np.hstack([pm_flx_AEGIS004.T, pm_err_AEGIS004.T, out_z_Arr.reshape(-1, 1)]))
     df.to_csv(filename, header=hdr)
 
     filename = f'{dirname}/QSO_JNEP.csv'
-    df = pd.DataFrame(np.hstack([pm_flx_JNEP.T, pm_err_JNEP.T, out_z_Arr.reshape(-1, 1)]))
+    df = pd.DataFrame(
+        np.hstack([pm_flx_JNEP.T, pm_err_JNEP.T, out_z_Arr.reshape(-1, 1)]))
     df.to_csv(filename, header=hdr)
 
 
@@ -288,4 +314,8 @@ if __name__ == '__main__':
     z_max = 5
     i_min = 20
     i_max = 30
-    main(z_min, z_max, i_min, i_max)
+
+    surname = 'recomputed_err'
+    main(z_min, z_max, i_min, i_max, True, surname)
+    surname = 'recomputed_err_no5s_lim'
+    main(z_min, z_max, i_min, i_max, False, surname)
