@@ -196,7 +196,7 @@ def SDSS_z_Arr(mjd, plate, fiber):
     return z_Arr
 
 
-def main(z_min, z_max, i_min, i_max, use_5s_lims=True, surname=''):
+def main(z_min, z_max, r_min, r_max, use_5s_lims=True, surname=''):
     # Load the SDSS catalog
     filename_pm_DR16 = ('../LAEs/csv/J-SPECTRA_QSO_Superset_DR16.csv')
 
@@ -222,16 +222,33 @@ def main(z_min, z_max, i_min, i_max, use_5s_lims=True, surname=''):
 
     # z_Arr of SDSS sources
     z_Arr = SDSS_z_Arr(mjd, plate, fiber)
-    i_flx_Arr = pm_SEDs_DR16[:, -1]
-
-    # Number of sources is 1e4 per \Delta i = 1
-    N_src = int((i_max - i_min) * 1e1)
+    r_flx_Arr = pm_SEDs_DR16[:, -2]
 
     # Output distribution
     # Flat z and i
-    out_z_Arr = np.random.uniform(z_min, z_max, N_src)
-    out_i_Arr = np.random.uniform(i_min, i_max, N_src)
-    out_i_flx_Arr = mag_to_flux(out_i_Arr, w_central[-1])
+    PD_z_Arr = np.array([0.5, 1.5, 2.5, 3.5, 4.5, 5.5])
+    PD_counts_Arr = np.array([975471, 2247522, 1282573, 280401, 31368, 4322])
+    PD_z_cum_x = np.linspace(z_min, z_max, 1000)
+    PD_counts_cum = np.cumsum(np.interp(PD_z_cum_x, PD_z_Arr, PD_counts_Arr))
+    PD_counts_cum /= PD_counts_cum.max()
+
+    # According to P-D et al. 2016
+    N_src = int(5_222_556 / 1e4 * 400) # In 400 deg^2
+
+    out_z_Arr = np.interp(np.random.rand(N_src),
+                         PD_counts_cum, PD_z_cum_x)
+    
+    # r distribution
+    PD_r_Arr = np.arange(15.75, 24, 0.5)
+    PD_counts_Arr = np.array([88, 227, 630, 1830, 5404, 15314, 38401, 80354,
+                              139413, 209407, 286455, 373434, 475434, 600426,
+                              754456, 948401, 1290584])
+    PD_r_cum_x = np.linspace(r_min, r_max, 1000)
+    PD_counts_cum = np.cumsum(np.interp(PD_r_cum_x, PD_r_Arr, PD_counts_Arr))
+    PD_counts_cum /= PD_counts_cum.max()
+
+    out_r_Arr = np.interp(np.random.rand(N_src), PD_counts_cum, PD_r_cum_x)
+    out_r_flx_Arr = mag_to_flux(out_r_Arr, w_central[-1])
 
     # Look for the closest source of SDSS in redshift
     out_sdss_idx_list = np.zeros(out_z_Arr.shape).astype(int)
@@ -249,27 +266,27 @@ def main(z_min, z_max, i_min, i_max, use_5s_lims=True, surname=''):
         out_sdss_idx_list[src] = np.random.choice(closest_z_Arr, 1)
 
     # Correction factor to match iSDSS
-    i_corr_factor = out_i_flx_Arr / i_flx_Arr[out_sdss_idx_list]
+    r_corr_factor = out_r_flx_Arr / r_flx_Arr[out_sdss_idx_list]
 
     # Output PM array
-    pm_flx_0 = pm_SEDs_DR16[out_sdss_idx_list] * i_corr_factor.reshape(-1, 1)
+    pm_flx_0 = pm_SEDs_DR16[out_sdss_idx_list] * r_corr_factor.reshape(-1, 1)
 
     # Compute errors for each field
-    print('Computing errors')
-    pm_flx_AEGIS001, pm_err_AEGIS001 = add_errors(
-        pm_flx_0.T, survey_name='minijpasAEGIS001', use_5s_lims=use_5s_lims)
-    pm_flx_AEGIS002, pm_err_AEGIS002 = add_errors(
-        pm_flx_0.T, survey_name='minijpasAEGIS002', use_5s_lims=use_5s_lims)
-    pm_flx_AEGIS003, pm_err_AEGIS003 = add_errors(
-        pm_flx_0.T, survey_name='minijpasAEGIS003', use_5s_lims=use_5s_lims)
-    pm_flx_AEGIS004, pm_err_AEGIS004 = add_errors(
-        pm_flx_0.T, survey_name='minijpasAEGIS004', use_5s_lims=use_5s_lims)
-    pm_flx_JNEP, pm_err_JNEP = add_errors(
-        pm_flx_0.T, survey_name='jnep', use_5s_lims=use_5s_lims)
+    # print('Computing errors')
+    # pm_flx_AEGIS001, pm_err_AEGIS001 = add_errors(
+    #     pm_flx_0.T, survey_name='minijpasAEGIS001', use_5s_lims=use_5s_lims)
+    # pm_flx_AEGIS002, pm_err_AEGIS002 = add_errors(
+    #     pm_flx_0.T, survey_name='minijpasAEGIS002', use_5s_lims=use_5s_lims)
+    # pm_flx_AEGIS003, pm_err_AEGIS003 = add_errors(
+    #     pm_flx_0.T, survey_name='minijpasAEGIS003', use_5s_lims=use_5s_lims)
+    # pm_flx_AEGIS004, pm_err_AEGIS004 = add_errors(
+    #     pm_flx_0.T, survey_name='minijpasAEGIS004', use_5s_lims=use_5s_lims)
+    # pm_flx_JNEP, pm_err_JNEP = add_errors(
+    #     pm_flx_0.T, survey_name='jnep', use_5s_lims=use_5s_lims)
 
     # Make the pandas df
     print('Saving files')
-    cat_name = f'QSO_flat_z{z_min}-{z_max}_i{i_min}-{i_max}_{surname}'
+    cat_name = f'QSO_flat_z{z_min}-{z_max}_r{r_min}-{r_max}_{surname}'
     dirname = f'/home/alberto/almacen/Source_cats/{cat_name}'
     os.makedirs(dirname, exist_ok=True)
 
@@ -280,42 +297,40 @@ def main(z_min, z_max, i_min, i_max, use_5s_lims=True, surname=''):
         np.hstack([pm_flx_0, out_z_Arr.reshape(-1, 1)]))
     df.to_csv(filename, header=hdr)
 
-    # With errors
-    hdr = tcurves['tag'] + [s + '_e' for s in tcurves['tag']] + ['z']
+    # # With errors
+    # hdr = tcurves['tag'] + [s + '_e' for s in tcurves['tag']] + ['z']
 
-    filename = f'{dirname}/QSO_AEGIS001.csv'
-    df = pd.DataFrame(
-        np.hstack([pm_flx_AEGIS001.T, pm_err_AEGIS001.T, out_z_Arr.reshape(-1, 1)]))
-    df.to_csv(filename, header=hdr)
+    # filename = f'{dirname}/QSO_AEGIS001.csv'
+    # df = pd.DataFrame(
+    #     np.hstack([pm_flx_AEGIS001.T, pm_err_AEGIS001.T, out_z_Arr.reshape(-1, 1)]))
+    # df.to_csv(filename, header=hdr)
 
-    filename = f'{dirname}/QSO_AEGIS002.csv'
-    df = pd.DataFrame(
-        np.hstack([pm_flx_AEGIS002.T, pm_err_AEGIS002.T, out_z_Arr.reshape(-1, 1)]))
-    df.to_csv(filename, header=hdr)
+    # filename = f'{dirname}/QSO_AEGIS002.csv'
+    # df = pd.DataFrame(
+    #     np.hstack([pm_flx_AEGIS002.T, pm_err_AEGIS002.T, out_z_Arr.reshape(-1, 1)]))
+    # df.to_csv(filename, header=hdr)
 
-    filename = f'{dirname}/QSO_AEGIS003.csv'
-    df = pd.DataFrame(
-        np.hstack([pm_flx_AEGIS003.T, pm_err_AEGIS003.T, out_z_Arr.reshape(-1, 1)]))
-    df.to_csv(filename, header=hdr)
+    # filename = f'{dirname}/QSO_AEGIS003.csv'
+    # df = pd.DataFrame(
+    #     np.hstack([pm_flx_AEGIS003.T, pm_err_AEGIS003.T, out_z_Arr.reshape(-1, 1)]))
+    # df.to_csv(filename, header=hdr)
 
-    filename = f'{dirname}/QSO_AEGIS004.csv'
-    df = pd.DataFrame(
-        np.hstack([pm_flx_AEGIS004.T, pm_err_AEGIS004.T, out_z_Arr.reshape(-1, 1)]))
-    df.to_csv(filename, header=hdr)
+    # filename = f'{dirname}/QSO_AEGIS004.csv'
+    # df = pd.DataFrame(
+    #     np.hstack([pm_flx_AEGIS004.T, pm_err_AEGIS004.T, out_z_Arr.reshape(-1, 1)]))
+    # df.to_csv(filename, header=hdr)
 
-    filename = f'{dirname}/QSO_JNEP.csv'
-    df = pd.DataFrame(
-        np.hstack([pm_flx_JNEP.T, pm_err_JNEP.T, out_z_Arr.reshape(-1, 1)]))
-    df.to_csv(filename, header=hdr)
+    # filename = f'{dirname}/QSO_JNEP.csv'
+    # df = pd.DataFrame(
+    #     np.hstack([pm_flx_JNEP.T, pm_err_JNEP.T, out_z_Arr.reshape(-1, 1)]))
+    # df.to_csv(filename, header=hdr)
 
 
 if __name__ == '__main__':
-    z_min = 0.001
-    z_max = 5
-    i_min = 20
-    i_max = 30
+    z_min = 1.9
+    z_max = 4.2
+    r_min = 16
+    r_max = 24
 
-    surname = 'recomputed_err'
-    main(z_min, z_max, i_min, i_max, True, surname)
-    surname = 'recomputed_err_no5s_lim'
-    main(z_min, z_max, i_min, i_max, False, surname)
+    surname = 'LAES'
+    main(z_min, z_max, r_min, r_max, True, surname)
