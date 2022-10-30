@@ -5,6 +5,8 @@ import pandas as pd
 
 from astropy.table import Table
 
+from scipy.integrate import quad
+
 from my_utilities import *
 
 
@@ -155,21 +157,37 @@ def add_errors(pm_flx, apply_err=True, survey_name='minijpasAEGIS001', use_5s_li
     return pm_SEDs, pm_SEDs_err
 
 
-def SDSS_z_Arr(mjd, plate, fiber):
-    correct_dir = 'csv/QSO_mock_build_files/'
+def lya_band_z(plate, mjd, fiber):
+    '''
+    Computes correct Arr and saves it to a .csv if it dont exist
+    '''
+    lya_band_res = 1000  # Resolution of the Lya band
+    lya_band_hw = 150  # Half width of the Lya band in Angstroms
+
+    correct_dir = 'csv/QSO_mock_correct_files/'
     fits_dir = '/home/alberto/almacen/SDSS_spectra_fits/DR16/QSO/'
     try:
-        z_Arr = np.load(f'{correct_dir}z_arr_dr16.npy')
+        z = np.load(f'{correct_dir}z_arr_dr16.npy')
+        lya_band = np.load(f'{correct_dir}lya_band_arr_dr16.npy')
         print('Correct arr loaded')
 
-        return z_Arr
+        return z, lya_band, lya_band_hw
     except:
         print('Computing correct arr...')
         pass
 
-    N_sources = len(mjd)
-    z_Arr = np.empty(N_sources)
+    N_sources = len(fiber)
 
+    # Declare some arrays
+    z = np.empty(N_sources)
+    lya_band = np.zeros(N_sources)
+
+    # Do the integrated photometry
+    # print('Extracting band fluxes from the spectra...')
+    print('Making lya_band Arr')
+    plate = plate.astype(int)
+    mjd = mjd.astype(int)
+    fiber = fiber.astype(int)
     for src in range(N_sources):
         if src % 500 == 0:
             print(f'{src} / {N_sources}', end='\r')
@@ -177,23 +195,126 @@ def SDSS_z_Arr(mjd, plate, fiber):
         spec_name = fits_dir + \
             f'spec-{plate[src]:04d}-{mjd[src]:05d}-{fiber[src]:04d}.fits'
 
+        spec = Table.read(spec_name, hdu=1, format='fits')
         spzline = Table.read(spec_name, hdu=3, format='fits')
 
         # Select the source's z as the z from any line not being Lya.
         # Lya z is biased because is taken from the position of the peak of the line,
         # and in general Lya is assymmetrical.
-        this_z_Arr = spzline['LINEZ'][spzline['LINENAME'] != 'Ly_alpha']
-        this_z_Arr = np.atleast_1d(this_z_Arr[this_z_Arr != 0.])
-
-        if len(this_z_Arr) > 0:
-            z_Arr[src] = this_z_Arr[-1]
+        z_Arr = spzline['LINEZ'][spzline['LINENAME'] != 'Ly_alpha']
+        z_Arr = np.atleast_1d(z_Arr[z_Arr != 0.])
+        if len(z_Arr) > 0:
+            z[src] = z_Arr[-1]
         else:
-            z_Arr[src] = 0.
+            z[src] = 0.
+
+        if z[src] < 2:
+            continue
+
+        # Synthetic band in Ly-alpha wavelength +- 200 Angstroms
+        w_lya = 1215.67
+        w_lya_obs = w_lya * (1 + z[src])
+
+        lya_band_tcurves = {
+            'tag': ['lyaband'],
+            't': [np.ones(lya_band_res)],
+            'w': [np.linspace(
+                w_lya_obs - lya_band_hw, w_lya_obs + lya_band_hw, lya_band_res
+            )]
+        }
+        # Extract the photometry of Ly-alpha (L_Arr)
+        if z[src] > 0:
+            lya_band[src] = JPAS_synth_phot(
+                spec['FLUX'] * 1e-17, 10 ** spec['LOGLAM'], lya_band_tcurves
+            )
+        if ~np.isfinite(lya_band[src]):
+            lya_band[src] = 0
 
     os.makedirs(correct_dir, exist_ok=True)
-    np.save(f'{correct_dir}z_arr_dr16.npy', z_Arr)
+    np.save(f'{correct_dir}z_arr_dr16', z)
+    np.save(f'{correct_dir}lya_band_arr_dr16', lya_band)
 
-    return z_Arr
+    return z, lya_band, lya_band_hw
+
+def source_f_cont(mjd, plate, fiber):
+    try:
+        f_cont = np.load('../LAEs/MyMocks/npy/f_cont_DR16.npy')
+        print('f_cont Arr loaded')
+        return f_cont
+    except:
+        pass
+    print('Computing f_cont Arr')
+
+    Lya_fts = pd.read_csv('../csv/Lya_fts_DR16.csv')
+
+    N_sources = len(mjd)
+    EW = np.empty(N_sources)
+    Flambda = np.empty(N_sources)
+
+    for src in range(N_sources):
+        if src % 1000 == 0:
+            print(f'{src} / {N_sources}', end='\r')
+
+        where = np.where(
+            (int(mjd[src]) == Lya_fts['mjd'].to_numpy().flatten())
+            & (int(plate[src]) == Lya_fts['plate'].to_numpy().flatten())
+            & (int(fiber[src]) == Lya_fts['fiberid'].to_numpy().flatten())
+        )
+
+        # Some sources are repeated, so we take the first occurence
+        where = where[0][0]
+
+        EW[src] = np.abs(Lya_fts['LyaEW'][where])  # Obs frame EW by now
+        Flambda[src] = Lya_fts['LyaF'][where]
+
+    Flambda *= 1e-17  # Correct units & apply correction
+
+    # From the EW formula:
+    f_cont = Flambda / EW
+
+    np.save('npy/f_cont_DR16.npy', f_cont)
+
+    return f_cont
+
+
+def fit_dist_to_profile(L_Arr, f, L_min, L_max, L_step, volume):
+    '''
+    L_Arr is the array of the distribution to fit
+    f is a function of L
+
+    This function trims the L_Arr profile to fit f.
+    '''
+    N_steps = int((L_max - L_min) / L_step)
+
+    # This is the output mask of sources to include
+    out_mask = np.ones_like(L_Arr).astype(bool)
+
+    for j in range(N_steps):
+        L_step_min = L_min + j * L_step
+        L_step_max = L_min + (j + 1) * L_step
+        this_mask = (L_Arr > L_step_min) & (L_Arr <= L_step_max)
+
+        N_src_in = sum(this_mask)
+        N_src_out = quad(f, L_step_min, L_step_max)[0] * volume
+        N_diff = int(N_src_in - N_src_out)
+
+        if N_diff <= 0:
+            continue
+
+        # N_diff of sources have to be removed
+        to_remove = np.random.choice(np.where(this_mask)[0], N_diff)
+        print(L_Arr[to_remove])
+        # out_mask[to_remove] = False
+    
+    return out_mask
+
+def LF_f(L_lya):
+    phistar = 3.33e-6
+    Lstar = 10 ** 44.65
+    alpha = -1.35
+
+    L_lya = 10 ** L_lya
+    return schechter(L_lya, phistar, Lstar, alpha) * L_lya * np.log(10)
 
 
 def main(z_min, z_max, r_min, r_max, use_5s_lims=True, surname=''):
@@ -221,7 +342,16 @@ def main(z_min, z_max, r_min, r_max, use_5s_lims=True, surname=''):
     fiber = plate_mjd_fiber[2].astype(int)
 
     # z_Arr of SDSS sources
-    z_Arr = SDSS_z_Arr(mjd, plate, fiber)
+    z_Arr, lya_band, lya_band_hw = lya_band_z(plate, mjd, fiber)
+
+    f_cont = source_f_cont(mjd, plate, fiber)
+
+    F_line = (lya_band - f_cont) * 2 * lya_band_hw
+    F_line_err = np.zeros(lya_band.shape)
+    EW0 = F_line / f_cont / (1 + z_Arr)
+    dL = cosmo.luminosity_distance(z_Arr).to(u.cm).value
+    L = np.log10(F_line * 4*np.pi * dL ** 2)
+
     r_flx_Arr = pm_SEDs_DR16[:, -2]
 
     # Output distribution
@@ -233,7 +363,8 @@ def main(z_min, z_max, r_min, r_max, use_5s_lims=True, surname=''):
     PD_counts_cum /= PD_counts_cum.max()
 
     # According to P-D et al. 2016
-    N_src = int(5_222_556 / 1e4 * 400) # In 400 deg^2
+    area_obs = 1
+    N_src = int(5_222_556 / 1e4 * 400) * 2 # Compute the double of sources and trim later
 
     out_z_Arr = np.interp(np.random.rand(N_src),
                          PD_counts_cum, PD_z_cum_x)
@@ -270,6 +401,10 @@ def main(z_min, z_max, r_min, r_max, use_5s_lims=True, surname=''):
 
     # Output PM array
     pm_flx_0 = pm_SEDs_DR16[out_sdss_idx_list] * r_corr_factor.reshape(-1, 1)
+    out_EW = EW0[out_sdss_idx_list] * (1 + z_Arr[out_sdss_idx_list]) / (1 + out_z_Arr)
+    out_L = L[out_sdss_idx_list] + np.log10(r_corr_factor)
+    out_Flambda = F_line[out_sdss_idx_list] * r_corr_factor
+    out_Flambda_err = F_line_err[out_sdss_idx_list] * r_corr_factor
 
     # Compute errors for each field
     # print('Computing errors')
@@ -284,6 +419,17 @@ def main(z_min, z_max, r_min, r_max, use_5s_lims=True, surname=''):
     # pm_flx_JNEP, pm_err_JNEP = add_errors(
     #     pm_flx_0.T, survey_name='jnep', use_5s_lims=use_5s_lims)
 
+    # Trim the distribution
+    volume = z_volume(z_min, z_max, area_obs)
+    LF_mask = fit_dist_to_profile(out_L, LF_f, 42.5, 46, 0.05, volume)
+
+    pm_flx_0 = pm_flx_0[LF_mask]
+    out_z_Arr = out_z_Arr[LF_mask]
+    out_EW = out_EW[LF_mask]
+    out_L = out_L[LF_mask]
+    out_Flambda = out_Flambda[LF_mask]
+    out_Flambda_err = out_Flambda_err[LF_mask]
+
     # Make the pandas df
     print('Saving files')
     cat_name = f'QSO_flat_z{z_min}-{z_max}_r{r_min}-{r_max}_{surname}'
@@ -291,10 +437,16 @@ def main(z_min, z_max, r_min, r_max, use_5s_lims=True, surname=''):
     os.makedirs(dirname, exist_ok=True)
 
     # Withour errors
-    filename = f'{dirname}/QSO_no_err.csv'
-    hdr = tcurves['tag'] + ['z']
+    filename = f'{dirname}/data0.csv'
+    hdr = (
+        tcurves['tag']
+        + [s + '_e' for s in tcurves['tag']]
+        + ['z', 'EW0', 'L_lya', 'F_line', 'F_line_err']
+    )
     df = pd.DataFrame(
-        np.hstack([pm_flx_0, out_z_Arr.reshape(-1, 1)]))
+        np.hstack([pm_flx_0, pm_flx_0 * 0, out_z_Arr.reshape(-1, 1),
+                  out_EW.reshape(-1, 1), out_L.reshape(-1, 1),
+                  out_Flambda.reshape(-1, 1), out_Flambda_err.reshape(-1, 1)]))
     df.to_csv(filename, header=hdr)
 
     # # With errors
