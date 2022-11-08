@@ -1,5 +1,7 @@
 import os
 
+import matplotlib.pyplot as plt
+
 import numpy as np
 import pandas as pd
 
@@ -303,8 +305,7 @@ def fit_dist_to_profile(L_Arr, f, L_min, L_max, L_step, volume):
 
         # N_diff of sources have to be removed
         to_remove = np.random.choice(np.where(this_mask)[0], N_diff)
-        print(L_Arr[to_remove])
-        # out_mask[to_remove] = False
+        out_mask[to_remove] = False
     
     return out_mask
 
@@ -352,6 +353,15 @@ def main(z_min, z_max, r_min, r_max, use_5s_lims=True, surname=''):
     dL = cosmo.luminosity_distance(z_Arr).to(u.cm).value
     L = np.log10(F_line * 4*np.pi * dL ** 2)
 
+    # fig, ax = plt.subplots(figsize=(5, 4))
+
+    # ax.plot(EW0, L, ls='', marker='o', markersize=3)
+    # ax.set_xscale('log')
+    # ax.set_ylim(42, 45.5)
+    # ax.set_xlim(0.01, 1e4)
+
+    # plt.show()
+
     r_flx_Arr = pm_SEDs_DR16[:, -2]
 
     # Output distribution
@@ -363,8 +373,8 @@ def main(z_min, z_max, r_min, r_max, use_5s_lims=True, surname=''):
     PD_counts_cum /= PD_counts_cum.max()
 
     # According to P-D et al. 2016
-    area_obs = 1
-    N_src = int(5_222_556 / 1e4 * 400) * 2 # Compute the double of sources and trim later
+    area_obs = 4
+    N_src = int(5_222_556 / 1e4 * area_obs) * 2 # Compute the double of sources and trim later
 
     out_z_Arr = np.interp(np.random.rand(N_src),
                          PD_counts_cum, PD_z_cum_x)
@@ -387,8 +397,8 @@ def main(z_min, z_max, r_min, r_max, use_5s_lims=True, surname=''):
     for src in range(N_src):
         if src % 100 == 0:
             print(f'{src} / {N_src}', end='\r')
-        # Select sources with a redshift closer than 0.02
-        closest_z_Arr = np.where(np.abs(z_Arr - out_z_Arr[src]) < 0.02)[0]
+        # Select sources with a redshift closer than 0.06
+        closest_z_Arr = np.where(np.abs(z_Arr - out_z_Arr[src]) < 0.06)[0]
         # If less than 10 objects found with that z_diff, then select the 10 closer
         if len(closest_z_Arr < 10):
             closest_z_Arr = np.abs(z_Arr - out_z_Arr[src]).argsort()[:10]
@@ -421,7 +431,12 @@ def main(z_min, z_max, r_min, r_max, use_5s_lims=True, surname=''):
 
     # Trim the distribution
     volume = z_volume(z_min, z_max, area_obs)
-    LF_mask = fit_dist_to_profile(out_L, LF_f, 42.5, 46, 0.05, volume)
+    LF_mask1 = fit_dist_to_profile(out_L, LF_f, 42.5, 46, 0.05, volume)
+    LF_mask2 = fit_dist_to_profile(out_L[LF_mask1], LF_f, 42.3, 46, 0.05, volume)
+
+    # Composition of masks
+    LF_mask1[LF_mask1] = LF_mask2
+    LF_mask = LF_mask1
 
     pm_flx_0 = pm_flx_0[LF_mask]
     out_z_Arr = out_z_Arr[LF_mask]
