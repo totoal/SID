@@ -164,11 +164,11 @@ def Synthetic_Photometry_measure_flux(lambda_Arr, f_lambda_Arr, lambda_Arr_f, Tr
 #==============================================================#
 
 
-def IGM_TRANSMISSION(redshift_Arr, A, B):
-
-    Transmission_Arr = np.exp(A * (1 + redshift_Arr)**B)
-
-    return Transmission_Arr
+def IGM_TRANSMISSION(w_Arr, A=-0.001845, B=3.924):
+    '''
+    Returns the IGM transmission associated with the Lya Break.
+    '''
+    return np.exp(A * (w_Arr / 1215.67)**B)
 ##==============================================================#
 ##==============================================================#
 ##==============================================================#
