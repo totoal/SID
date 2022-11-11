@@ -318,9 +318,9 @@ def LF_f(L_lya):
     return schechter(L_lya, phistar, Lstar, alpha) * L_lya * np.log(10)
 
 
-def main(z_min, z_max, r_min, r_max, use_5s_lims=True, surname=''):
+def main(z_min, z_max, r_min, r_max, surname=''):
     # Load the SDSS catalog
-    filename_pm_DR16 = ('../LAEs/csv/J-SPECTRA_QSO_Superset_DR16.csv')
+    filename_pm_DR16 = ('../LAEs/csv/J-SPECTRA_QSO_Superset_DR16_v2.csv')
 
     pm_SEDs_DR16 = pd.read_csv(
         filename_pm_DR16, usecols=np.arange(1, 64)).to_numpy()[:, :60]
@@ -373,7 +373,7 @@ def main(z_min, z_max, r_min, r_max, use_5s_lims=True, surname=''):
     PD_counts_cum /= PD_counts_cum.max()
 
     # According to P-D et al. 2016
-    area_obs = 4
+    area_obs = 400
     N_src = int(5_222_556 / 1e4 * area_obs) * 2 # Compute the double of sources and trim later
 
     out_z_Arr = np.interp(np.random.rand(N_src),
@@ -464,35 +464,6 @@ def main(z_min, z_max, r_min, r_max, use_5s_lims=True, surname=''):
                   out_Flambda.reshape(-1, 1), out_Flambda_err.reshape(-1, 1)]))
     df.to_csv(filename, header=hdr)
 
-    # # With errors
-    # hdr = tcurves['tag'] + [s + '_e' for s in tcurves['tag']] + ['z']
-
-    # filename = f'{dirname}/QSO_AEGIS001.csv'
-    # df = pd.DataFrame(
-    #     np.hstack([pm_flx_AEGIS001.T, pm_err_AEGIS001.T, out_z_Arr.reshape(-1, 1)]))
-    # df.to_csv(filename, header=hdr)
-
-    # filename = f'{dirname}/QSO_AEGIS002.csv'
-    # df = pd.DataFrame(
-    #     np.hstack([pm_flx_AEGIS002.T, pm_err_AEGIS002.T, out_z_Arr.reshape(-1, 1)]))
-    # df.to_csv(filename, header=hdr)
-
-    # filename = f'{dirname}/QSO_AEGIS003.csv'
-    # df = pd.DataFrame(
-    #     np.hstack([pm_flx_AEGIS003.T, pm_err_AEGIS003.T, out_z_Arr.reshape(-1, 1)]))
-    # df.to_csv(filename, header=hdr)
-
-    # filename = f'{dirname}/QSO_AEGIS004.csv'
-    # df = pd.DataFrame(
-    #     np.hstack([pm_flx_AEGIS004.T, pm_err_AEGIS004.T, out_z_Arr.reshape(-1, 1)]))
-    # df.to_csv(filename, header=hdr)
-
-    # filename = f'{dirname}/QSO_JNEP.csv'
-    # df = pd.DataFrame(
-    #     np.hstack([pm_flx_JNEP.T, pm_err_JNEP.T, out_z_Arr.reshape(-1, 1)]))
-    # df.to_csv(filename, header=hdr)
-
-
 if __name__ == '__main__':
     z_min = 1.9
     z_max = 4.2
@@ -500,4 +471,4 @@ if __name__ == '__main__':
     r_max = 24
 
     surname = 'LAES'
-    main(z_min, z_max, r_min, r_max, True, surname)
+    main(z_min, z_max, r_min, r_max, surname)
