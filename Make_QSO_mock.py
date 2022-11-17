@@ -323,7 +323,7 @@ def main(z_min, z_max, r_min, r_max, surname=''):
     filename_pm_DR16 = ('../LAEs/csv/J-SPECTRA_QSO_Superset_DR16_v2.csv')
 
     pm_SEDs_DR16 = pd.read_csv(
-        filename_pm_DR16, usecols=np.arange(1, 64)).to_numpy()[:, :60]
+        filename_pm_DR16, usecols=np.arange(1, 64)).to_numpy()[:, 1:61]
 
     def format_string4(x): return '{:04d}'.format(int(x))
     def format_string5(x): return '{:05d}'.format(int(x))
@@ -343,15 +343,23 @@ def main(z_min, z_max, r_min, r_max, surname=''):
     fiber = plate_mjd_fiber[2].astype(int)
 
     # z_Arr of SDSS sources
-    z_Arr, lya_band, lya_band_hw = lya_band_z(plate, mjd, fiber)
 
-    f_cont = source_f_cont(mjd, plate, fiber)
+    Lya_fts = pd.read_csv('../csv/Lya_fts_DR16_v2.csv')
+    z_Arr = Lya_fts['Lya_z'].to_numpy().flatten()
+    z_Arr[z_Arr == 0] = -1
 
-    F_line = (lya_band - f_cont) * 2 * lya_band_hw
-    F_line_err = np.zeros(lya_band.shape)
-    EW0 = F_line / f_cont / (1 + z_Arr)
+    F_line = np.array(Lya_fts['LyaF']) * 1e-17
+    F_line_err = np.array(Lya_fts['LyaF_err']) * 1e-17
+    EW0 = np.array(Lya_fts['LyaEW']) / (1 + z_Arr)
+    EW_err = np.array(Lya_fts['LyaEW_err'])
     dL = cosmo.luminosity_distance(z_Arr).to(u.cm).value
     L = np.log10(F_line * 4*np.pi * dL ** 2)
+
+    F_line_NV = np.array(Lya_fts['NVF']) * 1e-17
+    F_line_NV_err = np.array(Lya_fts['NVF_err']) * 1e-17
+    EW0_NV = np.array(Lya_fts['NVEW']) / (1 + z_Arr)
+    EW_NV_err = np.array(Lya_fts['NVFEW_err'])
+    L_NV = np.log10(F_line_NV * 4*np.pi * dL ** 2)
 
     # fig, ax = plt.subplots(figsize=(5, 4))
 
@@ -401,7 +409,7 @@ def main(z_min, z_max, r_min, r_max, surname=''):
         closest_z_Arr = np.where(np.abs(z_Arr - out_z_Arr[src]) < 0.06)[0]
         # If less than 10 objects found with that z_diff, then select the 10 closer
         if len(closest_z_Arr < 10):
-            closest_z_Arr = np.abs(z_Arr - out_z_Arr[src]).argsort()[:10]
+            closest_z_Arr = np.abs(z_Arr - out_z_Arr[src]).argsort()[:5]
 
         # Select one random source from those
         out_sdss_idx_list[src] = np.random.choice(closest_z_Arr, 1)
