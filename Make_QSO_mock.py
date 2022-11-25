@@ -323,7 +323,7 @@ def main(z_min, z_max, r_min, r_max, surname=''):
     filename_pm_DR16 = ('../LAEs/csv/J-SPECTRA_QSO_Superset_DR16_v2.csv')
 
     pm_SEDs_DR16 = pd.read_csv(
-        filename_pm_DR16, usecols=np.arange(1, 64)).to_numpy()[:, 1:61]
+        filename_pm_DR16, usecols=np.arange(1, 64)).to_numpy()[:, 0:60]
 
     def format_string4(x): return '{:04d}'.format(int(x))
     def format_string5(x): return '{:05d}'.format(int(x))
@@ -344,7 +344,7 @@ def main(z_min, z_max, r_min, r_max, surname=''):
 
     # z_Arr of SDSS sources
 
-    Lya_fts = pd.read_csv('../csv/Lya_fts_DR16_v2.csv')
+    Lya_fts = pd.read_csv('../LAEs/csv/Lya_fts_DR16_v2.csv')
     z_Arr = Lya_fts['Lya_z'].to_numpy().flatten()
     z_Arr[z_Arr == 0] = -1
 
@@ -360,6 +360,12 @@ def main(z_min, z_max, r_min, r_max, surname=''):
     EW0_NV = np.array(Lya_fts['NVEW']) / (1 + z_Arr)
     EW_NV_err = np.array(Lya_fts['NVFEW_err'])
     L_NV = np.log10(F_line_NV * 4*np.pi * dL ** 2)
+
+    # Mask poorly measured EWs
+    EW_snr = EW0 * (1 + z_Arr) / EW_err
+    mask_neg_EW0 = (EW0 < 0) | ~np.isfinite(EW0) | (EW_snr < 5)
+    L[mask_neg_EW0] = -1
+    z_Arr[mask_neg_EW0] = -1
 
     # fig, ax = plt.subplots(figsize=(5, 4))
 
@@ -382,34 +388,35 @@ def main(z_min, z_max, r_min, r_max, surname=''):
 
     # According to P-D et al. 2016
     area_obs = 400
-    N_src = int(5_222_556 / 1e4 * area_obs) * 2 # Compute the double of sources and trim later
+    N_src = int(1761572 / 1e4 * area_obs)
 
     out_z_Arr = np.interp(np.random.rand(N_src),
                          PD_counts_cum, PD_z_cum_x)
     
     # r distribution
     PD_r_Arr = np.arange(15.75, 24, 0.5)
-    PD_counts_Arr = np.array([88, 227, 630, 1830, 5404, 15314, 38401, 80354,
-                              139413, 209407, 286455, 373434, 475434, 600426,
-                              754456, 948401, 1290584])
+    PD_counts_Arr = np.array([2, 9, 32, 120, 444, 1595, 5314, 15158,
+                              34500, 62035, 93640, 127748, 166193, 212664,
+                              269514, 340738, 431866])
     PD_r_cum_x = np.linspace(r_min, r_max, 1000)
     PD_counts_cum = np.cumsum(np.interp(PD_r_cum_x, PD_r_Arr, PD_counts_Arr))
     PD_counts_cum /= PD_counts_cum.max()
 
     out_r_Arr = np.interp(np.random.rand(N_src), PD_counts_cum, PD_r_cum_x)
-    out_r_flx_Arr = mag_to_flux(out_r_Arr, w_central[-1])
+    out_r_flx_Arr = mag_to_flux(out_r_Arr, w_central[-2])
 
     # Look for the closest source of SDSS in redshift
     out_sdss_idx_list = np.zeros(out_z_Arr.shape).astype(int)
     print('Looking for the sources in SDSS catalog')
     for src in range(N_src):
-        if src % 100 == 0:
-            print(f'{src} / {N_src}', end='\r')
+        if src % 500 == 0:
+            print(f'{src} / {N_src}')
         # Select sources with a redshift closer than 0.06
-        closest_z_Arr = np.where(np.abs(z_Arr - out_z_Arr[src]) < 0.06)[0]
+        closest_z_Arr = np.where((np.abs(z_Arr - out_z_Arr[src]) < 0.06)
+                                 & (z_Arr > 1) & (L > 40))[0]
         # If less than 10 objects found with that z_diff, then select the 10 closer
-        if len(closest_z_Arr < 10):
-            closest_z_Arr = np.abs(z_Arr - out_z_Arr[src]).argsort()[:5]
+        if len(closest_z_Arr) < 10:
+            closest_z_Arr = np.abs(z_Arr - out_z_Arr[src]).argsort()[:10]
 
         # Select one random source from those
         out_sdss_idx_list[src] = np.random.choice(closest_z_Arr, 1)
@@ -424,34 +431,14 @@ def main(z_min, z_max, r_min, r_max, surname=''):
     out_Flambda = F_line[out_sdss_idx_list] * r_corr_factor
     out_Flambda_err = F_line_err[out_sdss_idx_list] * r_corr_factor
 
-    # Compute errors for each field
-    # print('Computing errors')
-    # pm_flx_AEGIS001, pm_err_AEGIS001 = add_errors(
-    #     pm_flx_0.T, survey_name='minijpasAEGIS001', use_5s_lims=use_5s_lims)
-    # pm_flx_AEGIS002, pm_err_AEGIS002 = add_errors(
-    #     pm_flx_0.T, survey_name='minijpasAEGIS002', use_5s_lims=use_5s_lims)
-    # pm_flx_AEGIS003, pm_err_AEGIS003 = add_errors(
-    #     pm_flx_0.T, survey_name='minijpasAEGIS003', use_5s_lims=use_5s_lims)
-    # pm_flx_AEGIS004, pm_err_AEGIS004 = add_errors(
-    #     pm_flx_0.T, survey_name='minijpasAEGIS004', use_5s_lims=use_5s_lims)
-    # pm_flx_JNEP, pm_err_JNEP = add_errors(
-    #     pm_flx_0.T, survey_name='jnep', use_5s_lims=use_5s_lims)
+    out_EW_NV = EW0_NV[out_sdss_idx_list] * (1 + z_Arr[out_sdss_idx_list]) / (1 + out_z_Arr)
+    out_L_NV = L_NV[out_sdss_idx_list] + np.log10(r_corr_factor)
+    out_Flambda_NV = F_line_NV[out_sdss_idx_list] * r_corr_factor
+    out_Flambda_NV_err = F_line_NV_err[out_sdss_idx_list] * r_corr_factor
 
-    # Trim the distribution
-    volume = z_volume(z_min, z_max, area_obs)
-    LF_mask1 = fit_dist_to_profile(out_L, LF_f, 42.5, 46, 0.05, volume)
-    LF_mask2 = fit_dist_to_profile(out_L[LF_mask1], LF_f, 42.3, 46, 0.05, volume)
-
-    # Composition of masks
-    LF_mask1[LF_mask1] = LF_mask2
-    LF_mask = LF_mask1
-
-    pm_flx_0 = pm_flx_0[LF_mask]
-    out_z_Arr = out_z_Arr[LF_mask]
-    out_EW = out_EW[LF_mask]
-    out_L = out_L[LF_mask]
-    out_Flambda = out_Flambda[LF_mask]
-    out_Flambda_err = out_Flambda_err[LF_mask]
+    out_mjd = mjd[out_sdss_idx_list]
+    out_fiber = fiber[out_sdss_idx_list]
+    out_plate = plate[out_sdss_idx_list]
 
     # Make the pandas df
     print('Saving files')
@@ -465,11 +452,28 @@ def main(z_min, z_max, r_min, r_max, surname=''):
         tcurves['tag']
         + [s + '_e' for s in tcurves['tag']]
         + ['z', 'EW0', 'L_lya', 'F_line', 'F_line_err']
+        + ['EW0_NV', 'L_NV', 'F_line_NV', 'F_line_NV_err']
+        + ['mjd', 'fiber', 'plate']
     )
     df = pd.DataFrame(
-        np.hstack([pm_flx_0, pm_flx_0 * 0, out_z_Arr.reshape(-1, 1),
-                  out_EW.reshape(-1, 1), out_L.reshape(-1, 1),
-                  out_Flambda.reshape(-1, 1), out_Flambda_err.reshape(-1, 1)]))
+        data=np.hstack(
+            (
+                pm_flx_0, pm_flx_0 * 0,
+                out_z_Arr.reshape(-1, 1),
+                out_EW.reshape(-1, 1),
+                out_L.reshape(-1, 1),
+                out_Flambda.reshape(-1, 1),
+                out_Flambda_err.reshape(-1, 1),
+                out_EW_NV.reshape(-1, 1),
+                out_L_NV.reshape(-1, 1),
+                out_Flambda_NV.reshape(-1, 1),
+                out_Flambda_NV_err.reshape(-1, 1),
+                out_mjd.reshape(-1, 1),
+                out_fiber.reshape(-1, 1),
+                out_plate.reshape(-1, 1),
+            )
+        )
+    )
     df.to_csv(filename, header=hdr)
 
 if __name__ == '__main__':
