@@ -7,7 +7,8 @@ import pandas as pd
 
 from astropy.table import Table
 
-from scipy.integrate import quad
+from scipy.integrate import quad, dblquad
+from scipy.interpolate import interp2d
 
 from my_utilities import *
 
@@ -318,7 +319,7 @@ def LF_f(L_lya):
     return schechter(L_lya, phistar, Lstar, alpha) * L_lya * np.log(10)
 
 
-def main(z_min, z_max, r_min, r_max, surname=''):
+def main(z_min, z_max, r_min, r_max, L_min, L_max, area_obs, surname=''):
     # Load the SDSS catalog
     filename_pm_DR16 = ('../LAEs/csv/J-SPECTRA_QSO_Superset_DR16_v2.csv')
 
@@ -358,62 +359,61 @@ def main(z_min, z_max, r_min, r_max, surname=''):
     F_line_NV = np.array(Lya_fts['NVF']) * 1e-17
     F_line_NV_err = np.array(Lya_fts['NVF_err']) * 1e-17
     EW0_NV = np.array(Lya_fts['NVEW']) / (1 + z_Arr)
-    EW_NV_err = np.array(Lya_fts['NVFEW_err'])
+    # EW_NV_err = np.array(Lya_fts['NVFEW_err'])
     L_NV = np.log10(F_line_NV * 4*np.pi * dL ** 2)
 
-    # Mask poorly measured EWs
-    EW_snr = EW0 * (1 + z_Arr) / EW_err
-    mask_neg_EW0 = (EW0 < 0) | ~np.isfinite(EW0) | (EW_snr < 5)
+    # Mask poorly measured EWs & not useful objects for this mock
+    mask_neg_EW0 = (EW0 <= 0) | ~np.isfinite(EW0)
     L[mask_neg_EW0] = -1
     z_Arr[mask_neg_EW0] = -1
 
-    # fig, ax = plt.subplots(figsize=(5, 4))
+    model = pd.read_csv('../LAEs/MyMocks/csv/PD2016-QSO_LF.csv')
+    counts_model_2D = model.to_numpy()[:-1, 1:-1].astype(float) * 1e-4 * area_obs
+    r_yy = np.arange(15.75, 24.25, 0.5)
+    z_xx = np.arange(0.5, 6, 1)
+    f_counts = interp2d(z_xx, r_yy, counts_model_2D)
 
-    # ax.plot(EW0, L, ls='', marker='o', markersize=3)
-    # ax.set_xscale('log')
-    # ax.set_ylim(42, 45.5)
-    # ax.set_xlim(0.01, 1e4)
+    volume = z_volume(z_min, z_max, area_obs)
 
-    # plt.show()
+    Lx = np.logspace(L_min, L_max, 10000)
+    log_Lx = np.log10(Lx)
+
+    # Daniele's LF
+    phistar1 = 3.33e-6
+    Lstar1 = 44.65
+    alpha1 = -1.35
+    Phi = schechter(Lx, phistar1, 10 ** Lstar1, alpha1) * Lx * np.log(10)
+
+    LF_p_cum_x = np.linspace(44, 47, 1000)
+    N_src = int(
+        simpson(
+            np.interp(LF_p_cum_x, log_Lx, Phi), LF_p_cum_x
+        ) * volume
+    )
+
+    # Re-bin distribution
+    z_xx_new, r_yy_new = (np.linspace(z_min, z_max, 100), np.linspace(15.75, 24.25, 100))
+    model_2D_interpolated = f_counts(z_xx_new, r_yy_new).flatten()
+    model_2D_interpolated /= np.sum(model_2D_interpolated) # Normalize
+    idx_sample = np.random.choice(np.arange(len(model_2D_interpolated)), N_src * 10,
+                                  p=model_2D_interpolated)
+    idx_sample = np.unravel_index(idx_sample, (len(z_xx_new), len(r_yy_new)))
+    out_z_Arr = z_xx_new[idx_sample[1]]
+    out_r_Arr = r_yy_new[idx_sample[0]]
 
     r_flx_Arr = pm_SEDs_DR16[:, -2]
-
-    # Output distribution
-    # Flat z and i
-    PD_z_Arr = np.array([0.5, 1.5, 2.5, 3.5, 4.5, 5.5])
-    PD_counts_Arr = np.array([975471, 2247522, 1282573, 280401, 31368, 4322])
-    PD_z_cum_x = np.linspace(z_min, z_max, 1000)
-    PD_counts_cum = np.cumsum(np.interp(PD_z_cum_x, PD_z_Arr, PD_counts_Arr))
-    PD_counts_cum /= PD_counts_cum.max()
-
-    # According to P-D et al. 2016
-    area_obs = 400
-    N_src = int(1761572 / 1e4 * area_obs)
-
-    out_z_Arr = np.interp(np.random.rand(N_src),
-                         PD_counts_cum, PD_z_cum_x)
-    
-    # r distribution
-    PD_r_Arr = np.arange(15.75, 24, 0.5)
-    PD_counts_Arr = np.array([2, 9, 32, 120, 444, 1595, 5314, 15158,
-                              34500, 62035, 93640, 127748, 166193, 212664,
-                              269514, 340738, 431866])
-    PD_r_cum_x = np.linspace(r_min, r_max, 1000)
-    PD_counts_cum = np.cumsum(np.interp(PD_r_cum_x, PD_r_Arr, PD_counts_Arr))
-    PD_counts_cum /= PD_counts_cum.max()
-
-    out_r_Arr = np.interp(np.random.rand(N_src), PD_counts_cum, PD_r_cum_x)
     out_r_flx_Arr = mag_to_flux(out_r_Arr, w_central[-2])
 
     # Look for the closest source of SDSS in redshift
     out_sdss_idx_list = np.zeros(out_z_Arr.shape).astype(int)
     print('Looking for the sources in SDSS catalog')
+    general_mask = (z_Arr > 1) & (L > 43) & (EW0 > 0)
     for src in range(N_src):
         if src % 500 == 0:
             print(f'{src} / {N_src}')
         # Select sources with a redshift closer than 0.06
         closest_z_Arr = np.where((np.abs(z_Arr - out_z_Arr[src]) < 0.06)
-                                 & (z_Arr > 1) & (L > 40))[0]
+                                 & general_mask)[0]
         # If less than 10 objects found with that z_diff, then select the 10 closer
         if len(closest_z_Arr) < 10:
             closest_z_Arr = np.abs(z_Arr - out_z_Arr[src]).argsort()[:10]
@@ -455,22 +455,27 @@ def main(z_min, z_max, r_min, r_max, surname=''):
         + ['EW0_NV', 'L_NV', 'F_line_NV', 'F_line_NV_err']
         + ['mjd', 'fiber', 'plate']
     )
+
+    # Mask according to L lims
+    L_mask = (out_L >= L_min) & (out_L < L_max)
+    print(f'Final N_sources = {sum(L_mask)}')
+
     df = pd.DataFrame(
         data=np.hstack(
             (
-                pm_flx_0, pm_flx_0 * 0,
-                out_z_Arr.reshape(-1, 1),
-                out_EW.reshape(-1, 1),
-                out_L.reshape(-1, 1),
-                out_Flambda.reshape(-1, 1),
-                out_Flambda_err.reshape(-1, 1),
-                out_EW_NV.reshape(-1, 1),
-                out_L_NV.reshape(-1, 1),
-                out_Flambda_NV.reshape(-1, 1),
-                out_Flambda_NV_err.reshape(-1, 1),
-                out_mjd.reshape(-1, 1),
-                out_fiber.reshape(-1, 1),
-                out_plate.reshape(-1, 1),
+                pm_flx_0[L_mask], pm_flx_0[L_mask] * 0,
+                out_z_Arr[L_mask].reshape(-1, 1),
+                out_EW[L_mask].reshape(-1, 1),
+                out_L[L_mask].reshape(-1, 1),
+                out_Flambda[L_mask].reshape(-1, 1),
+                out_Flambda_err[L_mask].reshape(-1, 1),
+                out_EW_NV[L_mask].reshape(-1, 1),
+                out_L_NV[L_mask].reshape(-1, 1),
+                out_Flambda_NV[L_mask].reshape(-1, 1),
+                out_Flambda_NV_err[L_mask].reshape(-1, 1),
+                out_mjd[L_mask].reshape(-1, 1),
+                out_fiber[L_mask].reshape(-1, 1),
+                out_plate[L_mask].reshape(-1, 1),
             )
         )
     )
@@ -479,8 +484,22 @@ def main(z_min, z_max, r_min, r_max, surname=''):
 if __name__ == '__main__':
     z_min = 1.9
     z_max = 4.2
-    r_min = 16
-    r_max = 24
+    r_min = 18
+    r_max = 23
+    L_min = 40
+    L_max = 47
+    area_obs = 200
 
     surname = 'LAES'
-    main(z_min, z_max, r_min, r_max, surname)
+    main(z_min, z_max, r_min, r_max, L_min, L_max, area_obs, surname)
+
+    z_min = 1.9
+    z_max = 4.2
+    r_min = 18
+    r_max = 23
+    L_min = 44
+    L_max = 47
+    area_obs = 2000
+
+    surname = 'LAES_hiL'
+    main(z_min, z_max, r_min, r_max, L_min, L_max, area_obs, surname)

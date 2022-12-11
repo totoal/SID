@@ -7,7 +7,8 @@ import pandas as pd
 import csv
 import matplotlib.pyplot as plt
 
-from scipy.integrate import simpson
+from scipy.integrate import simpson, dblquad
+from scipy.interpolate import interp2d
 
 from astropy.cosmology import Planck18 as cosmo
 from astropy import units as u
