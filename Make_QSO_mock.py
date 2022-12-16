@@ -1,7 +1,5 @@
 import os
 
-import matplotlib.pyplot as plt
-
 import numpy as np
 import pandas as pd
 
@@ -352,7 +350,6 @@ def main(z_min, z_max, r_min, r_max, L_min, L_max, area_obs, surname=''):
     F_line = np.array(Lya_fts['LyaF']) * 1e-17
     F_line_err = np.array(Lya_fts['LyaF_err']) * 1e-17
     EW0 = np.array(Lya_fts['LyaEW']) / (1 + z_Arr)
-    EW_err = np.array(Lya_fts['LyaEW_err'])
     dL = cosmo.luminosity_distance(z_Arr).to(u.cm).value
     L = np.log10(F_line * 4*np.pi * dL ** 2)
 
@@ -364,35 +361,23 @@ def main(z_min, z_max, r_min, r_max, L_min, L_max, area_obs, surname=''):
 
     # Mask poorly measured EWs & not useful objects for this mock
     mask_neg_EW0 = (EW0 <= 0) | ~np.isfinite(EW0)
-    L[mask_neg_EW0] = -1
-    z_Arr[mask_neg_EW0] = -1
+    L[mask_neg_EW0] = 0
+    z_Arr[mask_neg_EW0] = 99
 
     model = pd.read_csv('../LAEs/MyMocks/csv/PD2016-QSO_LF.csv')
     counts_model_2D = model.to_numpy()[:-1, 1:-1].astype(float) * 1e-4 * area_obs
     r_yy = np.arange(15.75, 24.25, 0.5)
     z_xx = np.arange(0.5, 6, 1)
+    dr = r_yy[1] - r_yy[0]
+    dz = z_xx[1] - z_xx[0]
     f_counts = interp2d(z_xx, r_yy, counts_model_2D)
 
-    volume = z_volume(z_min, z_max, area_obs)
-
-    Lx = np.logspace(L_min, L_max, 10000)
-    log_Lx = np.log10(Lx)
-
-    # Daniele's LF
-    phistar1 = 3.33e-6
-    Lstar1 = 44.65
-    alpha1 = -1.35
-    Phi = schechter(Lx, phistar1, 10 ** Lstar1, alpha1) * Lx * np.log(10)
-
-    LF_p_cum_x = np.linspace(44, 47, 1000)
-    N_src = int(
-        simpson(
-            np.interp(LF_p_cum_x, log_Lx, Phi), LF_p_cum_x
-        ) * volume
-    )
+    N_src = int(dblquad(interp2d(z_xx, r_yy, counts_model_2D / dr / dz),
+                    r_min, r_max, z_min, z_max)[0])
 
     # Re-bin distribution
-    z_xx_new, r_yy_new = (np.linspace(z_min, z_max, 100), np.linspace(15.75, 24.25, 100))
+    z_xx_new = np.linspace(z_min, z_max, 10000)
+    r_yy_new = np.linspace(r_min, r_max, 10000)
     model_2D_interpolated = f_counts(z_xx_new, r_yy_new).flatten()
     model_2D_interpolated /= np.sum(model_2D_interpolated) # Normalize
     idx_sample = np.random.choice(np.arange(len(model_2D_interpolated)), N_src * 10,
@@ -407,12 +392,12 @@ def main(z_min, z_max, r_min, r_max, L_min, L_max, area_obs, surname=''):
     # Look for the closest source of SDSS in redshift
     out_sdss_idx_list = np.zeros(out_z_Arr.shape).astype(int)
     print('Looking for the sources in SDSS catalog')
-    general_mask = (z_Arr > 1) & (L > 43) & (EW0 > 0)
+    general_mask = (((z_Arr > 1.9) & (L > 40) & (EW0 > 0)) | (z_Arr <= 1.9))
     for src in range(N_src):
         if src % 500 == 0:
             print(f'{src} / {N_src}')
         # Select sources with a redshift closer than 0.06
-        closest_z_Arr = np.where((np.abs(z_Arr - out_z_Arr[src]) < 0.06)
+        closest_z_Arr = np.where((np.abs(z_Arr - out_z_Arr[src]) < 0.1)
                                  & general_mask)[0]
         # If less than 10 objects found with that z_diff, then select the 10 closer
         if len(closest_z_Arr) < 10:
@@ -421,7 +406,7 @@ def main(z_min, z_max, r_min, r_max, L_min, L_max, area_obs, surname=''):
         # Select one random source from those
         out_sdss_idx_list[src] = np.random.choice(closest_z_Arr, 1)
 
-    # Correction factor to match iSDSS
+    # Correction factor to match rSDSS
     r_corr_factor = out_r_flx_Arr / r_flx_Arr[out_sdss_idx_list]
 
     # Output PM array
@@ -442,12 +427,14 @@ def main(z_min, z_max, r_min, r_max, L_min, L_max, area_obs, surname=''):
 
     # Make the pandas df
     print('Saving files')
-    cat_name = f'QSO_flat_z{z_min}-{z_max}_r{r_min}-{r_max}_{surname}'
+    cat_name = f'QSO_{surname}'
     dirname = f'/home/alberto/almacen/Source_cats/{cat_name}'
     os.makedirs(dirname, exist_ok=True)
 
     # Withour errors
-    filename = f'{dirname}/data0.csv'
+    subpart = str(int(z_min * 100)) + str(int(z_max * 100))
+    print(f'Subpart = {subpart}')
+    filename = f'{dirname}/data{subpart}.csv'
     hdr = (
         tcurves['tag']
         + [s + '_e' for s in tcurves['tag']]
@@ -457,7 +444,10 @@ def main(z_min, z_max, r_min, r_max, L_min, L_max, area_obs, surname=''):
     )
 
     # Mask according to L lims
-    L_mask = (out_L >= L_min) & (out_L < L_max)
+    if L_min > 0 and L_max > 0:
+        L_mask = (out_L >= L_min) & (out_L < L_max)
+    else:
+        L_mask = np.ones_like(out_L).astype(bool)
     print(f'Final N_sources = {sum(L_mask)}')
 
     df = pd.DataFrame(
@@ -482,24 +472,32 @@ def main(z_min, z_max, r_min, r_max, L_min, L_max, area_obs, surname=''):
     df.to_csv(filename, header=hdr)
 
 if __name__ == '__main__':
-    z_min = 1.9
-    z_max = 4.2
-    r_min = 18
-    r_max = 23
-    L_min = 40
-    L_max = 47
-    area_obs = 200
+    # zs_list = [[1.9, 2.25], [2.25, 2.5], [2.5, 2.75], [2.75, 3],
+    #            [3, 3.25], [3.25, 3.5], [3.5, 3.75], [3.75, 4], [4, 4.5]]
+    # for z_min, z_max in zs_list:
+    #     r_min = 16
+    #     r_max = 24
+    #     L_min = 40
+    #     L_max = 47
+    #     area_obs = 200
+    #     surname = 'LAES'
+    #     main(z_min, z_max, r_min, r_max, L_min, L_max, area_obs, surname)
 
-    surname = 'LAES'
-    main(z_min, z_max, r_min, r_max, L_min, L_max, area_obs, surname)
+    #     r_min = 16
+    #     r_max = 24
+    #     L_min = 44
+    #     L_max = 47
+    #     area_obs = 2000
+    #     surname = 'LAES_hiL'
+    #     main(z_min, z_max, r_min, r_max, L_min, L_max, area_obs, surname)
 
-    z_min = 1.9
-    z_max = 4.2
-    r_min = 18
-    r_max = 23
-    L_min = 44
-    L_max = 47
-    area_obs = 2000
-
-    surname = 'LAES_hiL'
-    main(z_min, z_max, r_min, r_max, L_min, L_max, area_obs, surname)
+    zs_list = [[0., 0.25], [0.25, 0.5], [0.5, 0.75], [0.75, 1.], [1., 1.25],
+                [1.25, 1.5], [1.5, 1.75], [1.75, 2.]]
+    for z_min, z_max in zs_list:
+        r_min = 16
+        r_max = 24
+        L_min = 0
+        L_max = 0
+        area_obs = 200
+        surname = 'contaminants'
+        main(z_min, z_max, r_min, r_max, L_min, L_max, area_obs, surname)
