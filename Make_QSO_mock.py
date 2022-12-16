@@ -368,19 +368,16 @@ def main(z_min, z_max, r_min, r_max, L_min, L_max, area_obs, surname=''):
     counts_model_2D = model.to_numpy()[:-1, 1:-1].astype(float) * 1e-4 * area_obs
     r_yy = np.arange(15.75, 24.25, 0.5)
     z_xx = np.arange(0.5, 6, 1)
-    dr = r_yy[1] - r_yy[0]
-    dz = z_xx[1] - z_xx[0]
     f_counts = interp2d(z_xx, r_yy, counts_model_2D)
 
-    N_src = int(dblquad(interp2d(z_xx, r_yy, counts_model_2D / dr / dz),
-                    r_min, r_max, z_min, z_max)[0])
+    N_src = int(dblquad(f_counts, r_min, r_max, z_min, z_max)[0] * 2)
 
     # Re-bin distribution
     z_xx_new = np.linspace(z_min, z_max, 10000)
     r_yy_new = np.linspace(r_min, r_max, 10000)
     model_2D_interpolated = f_counts(z_xx_new, r_yy_new).flatten()
     model_2D_interpolated /= np.sum(model_2D_interpolated) # Normalize
-    idx_sample = np.random.choice(np.arange(len(model_2D_interpolated)), N_src * 10,
+    idx_sample = np.random.choice(np.arange(len(model_2D_interpolated)), N_src,
                                   p=model_2D_interpolated)
     idx_sample = np.unravel_index(idx_sample, (len(z_xx_new), len(r_yy_new)))
     out_z_Arr = z_xx_new[idx_sample[1]]
@@ -472,24 +469,24 @@ def main(z_min, z_max, r_min, r_max, L_min, L_max, area_obs, surname=''):
     df.to_csv(filename, header=hdr)
 
 if __name__ == '__main__':
-    # zs_list = [[1.9, 2.25], [2.25, 2.5], [2.5, 2.75], [2.75, 3],
-    #            [3, 3.25], [3.25, 3.5], [3.5, 3.75], [3.75, 4], [4, 4.5]]
-    # for z_min, z_max in zs_list:
-    #     r_min = 16
-    #     r_max = 24
-    #     L_min = 40
-    #     L_max = 47
-    #     area_obs = 200
-    #     surname = 'LAES'
-    #     main(z_min, z_max, r_min, r_max, L_min, L_max, area_obs, surname)
+    zs_list = [[1.75, 2.25], [2.25, 2.5], [2.5, 2.75], [2.75, 3],
+               [3, 3.25], [3.25, 3.5], [3.5, 3.75], [3.75, 4], [4, 4.5]]
+    for z_min, z_max in zs_list:
+        r_min = 16
+        r_max = 24
+        L_min = 40
+        L_max = 47
+        area_obs = 200
+        surname = 'LAES'
+        main(z_min, z_max, r_min, r_max, L_min, L_max, area_obs, surname)
 
-    #     r_min = 16
-    #     r_max = 24
-    #     L_min = 44
-    #     L_max = 47
-    #     area_obs = 2000
-    #     surname = 'LAES_hiL'
-    #     main(z_min, z_max, r_min, r_max, L_min, L_max, area_obs, surname)
+        r_min = 16
+        r_max = 24
+        L_min = 44
+        L_max = 47
+        area_obs = 2000
+        surname = 'LAES_hiL'
+        main(z_min, z_max, r_min, r_max, L_min, L_max, area_obs, surname)
 
     zs_list = [[0., 0.25], [0.25, 0.5], [0.5, 0.75], [0.75, 1.], [1., 1.25],
                 [1.25, 1.5], [1.5, 1.75], [1.75, 2.]]
