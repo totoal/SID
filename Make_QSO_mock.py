@@ -308,15 +308,6 @@ def fit_dist_to_profile(L_Arr, f, L_min, L_max, L_step, volume):
     
     return out_mask
 
-def LF_f(L_lya):
-    phistar = 3.33e-6
-    Lstar = 10 ** 44.65
-    alpha = -1.35
-
-    L_lya = 10 ** L_lya
-    return schechter(L_lya, phistar, Lstar, alpha) * L_lya * np.log(10)
-
-
 def main(z_min, z_max, r_min, r_max, L_min, L_max, area_obs, surname=''):
     # Load the SDSS catalog
     filename_pm_DR16 = ('../LAEs/csv/J-SPECTRA_QSO_Superset_DR16_v2.csv')
@@ -345,10 +336,11 @@ def main(z_min, z_max, r_min, r_max, L_min, L_max, area_obs, surname=''):
 
     Lya_fts = pd.read_csv('../LAEs/csv/Lya_fts_DR16_v2.csv')
     z_Arr = Lya_fts['Lya_z'].to_numpy().flatten()
-    z_Arr[z_Arr == 0] = -1
+    # z_Arr[z_Arr == 0] = -1
 
     F_line = np.array(Lya_fts['LyaF']) * 1e-17
     F_line_err = np.array(Lya_fts['LyaF_err']) * 1e-17
+    F_lya_snr = F_line / F_line_err
     EW0 = np.array(Lya_fts['LyaEW']) / (1 + z_Arr)
     dL = cosmo.luminosity_distance(z_Arr).to(u.cm).value
     L = np.log10(F_line * 4*np.pi * dL ** 2)
@@ -360,9 +352,9 @@ def main(z_min, z_max, r_min, r_max, L_min, L_max, area_obs, surname=''):
     L_NV = np.log10(F_line_NV * 4*np.pi * dL ** 2)
 
     # Mask poorly measured EWs & not useful objects for this mock
-    mask_neg_EW0 = (EW0 <= 0) | ~np.isfinite(EW0)
-    L[mask_neg_EW0] = 0
-    z_Arr[mask_neg_EW0] = 99
+    mask_neg_EW0 = (EW0 <= 0) | ~np.isfinite(EW0) | (F_lya_snr < 3) | ~np.isfinite(L)
+    L[mask_neg_EW0] = 0.
+    # z_Arr[mask_neg_EW0] = 99
 
     model = pd.read_csv('../LAEs/MyMocks/csv/PD2016-QSO_LF.csv')
     counts_model_2D = model.to_numpy()[:-1, 1:-1].astype(float) * 1e-4 * area_obs
@@ -402,6 +394,8 @@ def main(z_min, z_max, r_min, r_max, L_min, L_max, area_obs, surname=''):
 
         # Select one random source from those
         out_sdss_idx_list[src] = np.random.choice(closest_z_Arr, 1)
+        # Modify z_out_Arr to match the new values
+        out_z_Arr[src] = z_Arr[out_sdss_idx_list[src]]
 
     # Correction factor to match rSDSS
     r_corr_factor = out_r_flx_Arr / r_flx_Arr[out_sdss_idx_list]
@@ -469,25 +463,6 @@ def main(z_min, z_max, r_min, r_max, L_min, L_max, area_obs, surname=''):
     df.to_csv(filename, header=hdr)
 
 if __name__ == '__main__':
-    zs_list = [[1.75, 2.25], [2.25, 2.5], [2.5, 2.75], [2.75, 3],
-               [3, 3.25], [3.25, 3.5], [3.5, 3.75], [3.75, 4], [4, 4.5]]
-    for z_min, z_max in zs_list:
-        r_min = 16
-        r_max = 24
-        L_min = 40
-        L_max = 47
-        area_obs = 200
-        surname = 'LAES'
-        main(z_min, z_max, r_min, r_max, L_min, L_max, area_obs, surname)
-
-        r_min = 16
-        r_max = 24
-        L_min = 44
-        L_max = 47
-        area_obs = 2000
-        surname = 'LAES_hiL'
-        main(z_min, z_max, r_min, r_max, L_min, L_max, area_obs, surname)
-
     zs_list = [[0., 0.25], [0.25, 0.5], [0.5, 0.75], [0.75, 1.], [1., 1.25],
                 [1.25, 1.5], [1.5, 1.75], [1.75, 2.]]
     for z_min, z_max in zs_list:
@@ -497,4 +472,23 @@ if __name__ == '__main__':
         L_max = 0
         area_obs = 200
         surname = 'contaminants'
+        main(z_min, z_max, r_min, r_max, L_min, L_max, area_obs, surname)
+
+    zs_list = [[1.75, 2.25], [2.25, 2.5], [2.5, 2.75], [2.75, 3],
+               [3, 3.25], [3.25, 3.5], [3.5, 3.75], [3.75, 4], [4, 4.5]]
+    for z_min, z_max in zs_list:
+        r_min = 16
+        r_max = 24
+        L_min = 40
+        L_max = 47
+        area_obs = 400
+        surname = 'LAES'
+        main(z_min, z_max, r_min, r_max, L_min, L_max, area_obs, surname)
+
+        r_min = 16
+        r_max = 24
+        L_min = 44
+        L_max = 47
+        area_obs = 4000
+        surname = 'LAES_hiL'
         main(z_min, z_max, r_min, r_max, L_min, L_max, area_obs, surname)
